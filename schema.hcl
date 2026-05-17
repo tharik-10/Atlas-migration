@@ -15,15 +15,15 @@ table "users" {
     type = varchar(255)
   }
 
-  column "address" {
-    type = varchar(255)
-    null = true
-  }
+#  column "address" {
+#    type = varchar(255)
+#    null = true
+#  }
 
-  column "location" {
-    type = varchar(100)
-    null = true
-  }
+#  column "location" {
+#    type = varchar(100)
+#    null = true
+#  }
 
   column "phone_number" {
     type = varchar(20)
