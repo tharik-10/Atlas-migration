@@ -1,70 +1,234 @@
 pipeline {
     agent any
 
+    triggers {
+        githubPush()
+    }
+
+    options {
+        timestamps()
+    }
+
     environment {
         DB_URL = "postgres://postgres:postgres@localhost:5432/testdb?sslmode=disable"
         MIGRATIONS_DIR = "file://migrations"
+        SCHEMA_FILE = "file://schema.hcl"
+        ATLAS_URL = "https://release.ariga.io/atlas/atlas-linux-amd64-latest"
     }
 
     stages {
 
-        stage('Checkout Code') {
+        stage('Clean Workspace') {
             steps {
-                echo "Checking out repository..."
-                checkout scm
+                cleanWs()
             }
         }
 
-        stage('Setup Atlas') {
+        stage('Checkout Repository') {
             steps {
-                echo "Installing/Verifying Atlas CLI..."
+                git branch: 'main',
+                url: 'https://github.com/AnithaAnnem/Atlas-migration.git'
+            }
+        }
+
+        stage('Verify Files') {
+            steps {
                 sh '''
-                    curl -sSf https://atlasgo.sh | sh
-                    atlas version
+                    echo "===== Repository Files ====="
+                    ls -la
+
+                    echo ""
+                    echo "===== Migration Files ====="
+                    ls -la migrations || true
+
+                    echo ""
+                    echo "===== schema.hcl ====="
+                    cat schema.hcl
                 '''
             }
         }
 
-        stage('Validate Migrations') {
+        stage('Install PostgreSQL') {
             steps {
-                echo "Validating migration files..."
                 sh '''
-                    atlas migrate lint \
+                    sudo apt update
+                    sudo apt install -y postgresql postgresql-contrib
+                '''
+            }
+        }
+
+        stage('Start PostgreSQL') {
+            steps {
+                sh '''
+                    sudo systemctl start postgresql
+                    sudo systemctl enable postgresql
+                '''
+            }
+        }
+
+        stage('Configure Database') {
+            steps {
+                sh '''
+                    sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD 'postgres';"
+
+                    sudo -u postgres psql -tc \
+                    "SELECT 1 FROM pg_database WHERE datname='testdb'" | grep -q 1 || \
+                    sudo -u postgres createdb testdb
+                '''
+            }
+        }
+
+        stage('Verify DB Connection') {
+            steps {
+                sh '''
+                    PGPASSWORD=postgres psql \
+                    -h localhost \
+                    -U postgres \
+                    -d testdb \
+                    -c "\\l"
+                '''
+            }
+        }
+
+        stage('Download Atlas CLI') {
+            steps {
+                sh '''
+                    wget -q ${ATLAS_URL} -O atlas
+                    chmod +x atlas
+
+                    ./atlas version
+                '''
+            }
+        }
+
+        stage('Fix Atlas Hash') {
+            steps {
+                sh '''
+                    mkdir -p migrations
+
+                    ./atlas migrate hash \
                     --dir ${MIGRATIONS_DIR}
                 '''
             }
         }
 
-        stage('Apply Migrations') {
+        stage('Generate Migration From schema.hcl') {
             steps {
-                echo "Applying database migrations..."
                 sh '''
-                    atlas migrate apply \
+                    ./atlas migrate diff auto_schema_update \
                     --dir ${MIGRATIONS_DIR} \
-                    --url ${DB_URL}
+                    --to ${SCHEMA_FILE} \
+                    --dev-url "docker://postgres/16/dev"
                 '''
             }
         }
 
-        stage('Verify DB State') {
+        stage('Rebuild Atlas Hash') {
             steps {
-                echo "Verifying applied migrations..."
                 sh '''
-                    atlas migrate status \
+                    ./atlas migrate hash \
+                    --dir ${MIGRATIONS_DIR}
+                '''
+            }
+        }
+
+        stage('Show Migration Files') {
+            steps {
+                sh '''
+                    echo "===== Migration Files ====="
+
+                    ls -la migrations
+
+                    echo ""
+                    echo "===== atlas.sum ====="
+
+                    cat migrations/atlas.sum
+                '''
+            }
+        }
+
+        stage('Migration Status Before Apply') {
+            steps {
+                sh '''
+                    ./atlas migrate status \
                     --dir ${MIGRATIONS_DIR} \
-                    --url ${DB_URL}
+                    --url "${DB_URL}"
+                '''
+            }
+        }
+
+        stage('Apply Atlas Migrations') {
+            steps {
+                sh '''
+                    ./atlas migrate apply \
+                    --dir ${MIGRATIONS_DIR} \
+                    --url "${DB_URL}"
+                '''
+            }
+        }
+
+        stage('Migration Status After Apply') {
+            steps {
+                sh '''
+                    ./atlas migrate status \
+                    --dir ${MIGRATIONS_DIR} \
+                    --url "${DB_URL}"
+                '''
+            }
+        }
+
+        stage('Inspect Database Schema') {
+            steps {
+                sh '''
+                    ./atlas schema inspect \
+                    --url "${DB_URL}"
+                '''
+            }
+        }
+
+        stage('Verify Users Table') {
+            steps {
+                sh '''
+                    PGPASSWORD=postgres psql \
+                    -h localhost \
+                    -U postgres \
+                    -d testdb \
+                    -c "\\d users"
+                '''
+            }
+        }
+
+        stage('Verify Atlas Revisions') {
+            steps {
+                sh '''
+                    PGPASSWORD=postgres psql \
+                    -h localhost \
+                    -U postgres \
+                    -d testdb \
+                    -c "SELECT version, description FROM atlas_schema_revisions.atlas_schema_revisions;"
                 '''
             }
         }
     }
 
     post {
+
         success {
-            echo "Database migrations applied successfully."
+            echo "=================================="
+            echo "Atlas Migration Successful"
+            echo "Schema Synced Successfully"
+            echo "=================================="
         }
 
         failure {
-            echo "Migration failed. Check logs."
+            echo "=================================="
+            echo "Atlas Migration Failed"
+            echo "Check Jenkins Logs"
+            echo "=================================="
+        }
+
+        always {
+            echo "Pipeline Finished"
         }
     }
 }
