@@ -15,25 +15,25 @@ table "users" {
     type = varchar(255)
   }
 
-#  column "address" {
-#    type = varchar(255)
-#    null = true
-#  }
+  column "address" {
+    type = varchar(255)
+    null = true
+  }
 
 #  column "location" {
 #    type = varchar(100)
 #    null = true
 #  }
 
-  column "phone_number" {
-    type = varchar(20)
-    null = true
-  }
+#  column "phone_number" {
+#    type = varchar(20)
+#    null = true
+#  }
 
-  column "city" {
-    type = varchar(100)
-    null = true
-  }
+#  column "city" {
+#    type = varchar(100)
+#    null = true
+#  }
 
   primary_key {
     columns = [column.id]
