@@ -27,7 +27,7 @@ pipeline {
         stage('Checkout Repository') {
             steps {
                 git branch: 'main',
-                url: 'https://github.com/AnithaAnnem/Atlas-migration.git'
+                    url: 'https://github.com/AnithaAnnem/Atlas-migration.git'
             }
         }
 
@@ -60,8 +60,14 @@ pipeline {
         stage('Start PostgreSQL') {
             steps {
                 sh '''
-                    sudo systemctl start postgresql
+                    sudo systemctl restart postgresql
                     sudo systemctl enable postgresql
+
+                    echo "Waiting for PostgreSQL to start..."
+                    sleep 10
+
+                    sudo systemctl status postgresql --no-pager
+                    sudo ss -lntp | grep 5432 || true
                 '''
             }
         }
@@ -82,10 +88,10 @@ pipeline {
             steps {
                 sh '''
                     PGPASSWORD=postgres psql \
-                    -h localhost \
-                    -U postgres \
-                    -d testdb \
-                    -c "\\l"
+                        -h localhost \
+                        -U postgres \
+                        -d testdb \
+                        -c "\\l"
                 '''
             }
         }
@@ -107,7 +113,7 @@ pipeline {
                     mkdir -p migrations
 
                     ./atlas migrate hash \
-                    --dir ${MIGRATIONS_DIR}
+                        --dir ${MIGRATIONS_DIR}
                 '''
             }
         }
@@ -116,9 +122,9 @@ pipeline {
             steps {
                 sh '''
                     ./atlas migrate diff auto_schema_update \
-                    --dir ${MIGRATIONS_DIR} \
-                    --to ${SCHEMA_FILE} \
-                    --dev-url "${DB_URL}"
+                        --dir ${MIGRATIONS_DIR} \
+                        --to ${SCHEMA_FILE} \
+                        --dev-url "${DB_URL}"
                 '''
             }
         }
@@ -127,7 +133,7 @@ pipeline {
             steps {
                 sh '''
                     ./atlas migrate hash \
-                    --dir ${MIGRATIONS_DIR}
+                        --dir ${MIGRATIONS_DIR}
                 '''
             }
         }
@@ -149,8 +155,8 @@ pipeline {
             steps {
                 sh '''
                     ./atlas migrate status \
-                    --dir ${MIGRATIONS_DIR} \
-                    --url "${DB_URL}"
+                        --dir ${MIGRATIONS_DIR} \
+                        --url "${DB_URL}"
                 '''
             }
         }
@@ -159,8 +165,8 @@ pipeline {
             steps {
                 sh '''
                     ./atlas migrate apply \
-                    --dir ${MIGRATIONS_DIR} \
-                    --url "${DB_URL}"
+                        --dir ${MIGRATIONS_DIR} \
+                        --url "${DB_URL}"
                 '''
             }
         }
@@ -169,8 +175,8 @@ pipeline {
             steps {
                 sh '''
                     ./atlas migrate status \
-                    --dir ${MIGRATIONS_DIR} \
-                    --url "${DB_URL}"
+                        --dir ${MIGRATIONS_DIR} \
+                        --url "${DB_URL}"
                 '''
             }
         }
@@ -179,7 +185,7 @@ pipeline {
             steps {
                 sh '''
                     ./atlas schema inspect \
-                    --url "${DB_URL}"
+                        --url "${DB_URL}"
                 '''
             }
         }
@@ -188,10 +194,10 @@ pipeline {
             steps {
                 sh '''
                     PGPASSWORD=postgres psql \
-                    -h localhost \
-                    -U postgres \
-                    -d testdb \
-                    -c "\\d users"
+                        -h localhost \
+                        -U postgres \
+                        -d testdb \
+                        -c "\\d users"
                 '''
             }
         }
@@ -200,17 +206,16 @@ pipeline {
             steps {
                 sh '''
                     PGPASSWORD=postgres psql \
-                    -h localhost \
-                    -U postgres \
-                    -d testdb \
-                    -c "SELECT version, description FROM atlas_schema_revisions.atlas_schema_revisions;"
+                        -h localhost \
+                        -U postgres \
+                        -d testdb \
+                        -c "SELECT version, description FROM atlas_schema_revisions.atlas_schema_revisions;"
                 '''
             }
         }
     }
 
     post {
-
         success {
             echo "=================================="
             echo "Atlas Migration Successful"
