@@ -85,16 +85,24 @@ pipeline {
         }
 
         stage('Verify DB Connection') {
-            steps {
-                sh '''
-                    PGPASSWORD=postgres psql \
-                        -h localhost \
-                        -U postgres \
-                        -d testdb \
-                        -c "\\l"
-                '''
-            }
-        }
+    steps {
+        sh '''
+            echo "Checking PostgreSQL readiness..."
+
+            until pg_isready -h localhost -p 5432
+            do
+                echo "Waiting for PostgreSQL..."
+                sleep 2
+            done
+
+            PGPASSWORD=postgres psql \
+            -h localhost \
+            -U postgres \
+            -d testdb \
+            -c "\\l"
+        '''
+    }
+}
 
         stage('Download Atlas CLI') {
             steps {
