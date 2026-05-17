@@ -21,6 +21,11 @@ table "users" {
     null = true
   }
 
+  column "phone_number" {
+    type = varchar(20)
+    null = true
+  }
+
   primary_key {
     columns = [column.id]
   }
