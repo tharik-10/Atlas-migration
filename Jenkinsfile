@@ -1,234 +1,82 @@
 pipeline {
     agent any
 
-    triggers {
-        githubPush()
-    }
-
-    options {
-        timestamps()
-    }
-
     environment {
-        DB_URL = "postgres://postgres:postgres@localhost:5432/testdb?sslmode=disable"
-        MIGRATIONS_DIR = "file://migrations"
-        SCHEMA_FILE = "file://schema.hcl"
-        ATLAS_URL = "https://release.ariga.io/atlas/atlas-linux-amd64-latest"
+        // Switch between 'CENTRAL' or 'EPHEMERAL'
+        DB_TARGET_TYPE = 'CENTRAL' 
+        
+        // Central DB Settings (Used if DB_TARGET_TYPE is 'CENTRAL')
+        CENTRAL_DB_HOST = 'your-central-db-ip' 
+        CENTRAL_DB_PORT = '5432'
+        CENTRAL_DB_NAME = 'atlasdemo'
+        CENTRAL_DB_USER = 'postgres'
+        CENTRAL_DB_PASS = 'yoursecurepassword' 
     }
 
     stages {
-
-        stage('Clean Workspace') {
+        stage('Checkout') {
             steps {
-                cleanWs()
+                git branch: 'main', url: 'https://github.com/YOUR_USERNAME/atlas-poc.git'
             }
         }
 
-        stage('Checkout Repository') {
+        stage('Install Atlas CLI') {
             steps {
-                git branch: 'main',
-                url: 'https://github.com/AnithaAnnem/Atlas-migration.git'
+                sh 'curl -sSf https://atlasgo.sh | sh'
             }
         }
 
-        stage('Verify Files') {
+        stage('Deploy local DB if needed') {
+            when { environment name: 'DB_TARGET_TYPE', value: 'EPHEMERAL' }
             steps {
+                echo "Spinning up local ephemeral DB..."
                 sh '''
-                    echo "===== Repository Files ====="
-                    ls -la
-
-                    echo ""
-                    echo "===== Migration Files ====="
-                    ls -la migrations || true
-
-                    echo ""
-                    echo "===== schema.hcl ====="
-                    cat schema.hcl
+                docker run -d --name jenkins-postgres -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=atlasdemo -p 5432:5432 postgres:15
+                sleep 10
                 '''
             }
         }
 
-        stage('Install PostgreSQL') {
+        stage('Verify Target Connection') {
             steps {
-                sh '''
-                    sudo apt update
-                    sudo apt install -y postgresql postgresql-contrib
-                '''
+                script {
+                    if (env.DB_TARGET_TYPE == 'CENTRAL') {
+                        def status = sh(script: "nc -z -w5 ${CENTRAL_DB_HOST} ${CENTRAL_DB_PORT}", returnStatus: true)
+                        if (status != 0) { error "Cannot reach Central Database Server!" }
+                        env.FINAL_DB_URL = "postgres://${CENTRAL_DB_USER}:${CENTRAL_DB_PASS}@${CENTRAL_DB_HOST}:${CENTRAL_DB_PORT}/${CENTRAL_DB_NAME}?sslmode=disable"
+                    } else {
+                        env.FINAL_DB_URL = "postgres://postgres:postgres@localhost:5432/atlasdemo?sslmode=disable"
+                    }
+                }
             }
         }
 
-        stage('Start PostgreSQL') {
+        stage('Lint & Code Review') {
             steps {
-                sh '''
-                    sudo systemctl start postgresql
-                    sudo systemctl enable postgresql
-                '''
+                // Analyzes migrations for destructive statements like drop tables
+                sh './atlas migrate lint --env local'
             }
         }
 
-        stage('Configure Database') {
+        stage('Apply Migrations') {
             steps {
-                sh '''
-                    sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD 'postgres';"
-
-                    sudo -u postgres psql -tc \
-                    "SELECT 1 FROM pg_database WHERE datname='testdb'" | grep -q 1 || \
-                    sudo -u postgres createdb testdb
-                '''
-            }
-        }
-
-        stage('Verify DB Connection') {
-            steps {
-                sh '''
-                    PGPASSWORD=postgres psql \
-                    -h localhost \
-                    -U postgres \
-                    -d testdb \
-                    -c "\\l"
-                '''
-            }
-        }
-
-        stage('Download Atlas CLI') {
-            steps {
-                sh '''
-                    wget -q ${ATLAS_URL} -O atlas
-                    chmod +x atlas
-
-                    ./atlas version
-                '''
-            }
-        }
-
-        stage('Fix Atlas Hash') {
-            steps {
-                sh '''
-                    mkdir -p migrations
-
-                    ./atlas migrate hash \
-                    --dir ${MIGRATIONS_DIR}
-                '''
-            }
-        }
-
-        stage('Generate Migration From schema.hcl') {
-            steps {
-                sh '''
-                    ./atlas migrate diff auto_schema_update \
-                    --dir ${MIGRATIONS_DIR} \
-                    --to ${SCHEMA_FILE} \
-                    --dev-url "docker://postgres/16/dev"
-                '''
-            }
-        }
-
-        stage('Rebuild Atlas Hash') {
-            steps {
-                sh '''
-                    ./atlas migrate hash \
-                    --dir ${MIGRATIONS_DIR}
-                '''
-            }
-        }
-
-        stage('Show Migration Files') {
-            steps {
-                sh '''
-                    echo "===== Migration Files ====="
-
-                    ls -la migrations
-
-                    echo ""
-                    echo "===== atlas.sum ====="
-
-                    cat migrations/atlas.sum
-                '''
-            }
-        }
-
-        stage('Migration Status Before Apply') {
-            steps {
-                sh '''
-                    ./atlas migrate status \
-                    --dir ${MIGRATIONS_DIR} \
-                    --url "${DB_URL}"
-                '''
-            }
-        }
-
-        stage('Apply Atlas Migrations') {
-            steps {
-                sh '''
-                    ./atlas migrate apply \
-                    --dir ${MIGRATIONS_DIR} \
-                    --url "${DB_URL}"
-                '''
-            }
-        }
-
-        stage('Migration Status After Apply') {
-            steps {
-                sh '''
-                    ./atlas migrate status \
-                    --dir ${MIGRATIONS_DIR} \
-                    --url "${DB_URL}"
-                '''
-            }
-        }
-
-        stage('Inspect Database Schema') {
-            steps {
-                sh '''
-                    ./atlas schema inspect \
-                    --url "${DB_URL}"
-                '''
-            }
-        }
-
-        stage('Verify Users Table') {
-            steps {
-                sh '''
-                    PGPASSWORD=postgres psql \
-                    -h localhost \
-                    -U postgres \
-                    -d testdb \
-                    -c "\\d users"
-                '''
-            }
-        }
-
-        stage('Verify Atlas Revisions') {
-            steps {
-                sh '''
-                    PGPASSWORD=postgres psql \
-                    -h localhost \
-                    -U postgres \
-                    -d testdb \
-                    -c "SELECT version, description FROM atlas_schema_revisions.atlas_schema_revisions;"
-                '''
+                sh """
+                ./atlas migrate apply \
+                  --url "${env.FINAL_DB_URL}" \
+                  --dir "file://migrations" \
+                  --auto-approve
+                """
             }
         }
     }
 
     post {
-
-        success {
-            echo "=================================="
-            echo "Atlas Migration Successful"
-            echo "Schema Synced Successfully"
-            echo "=================================="
-        }
-
-        failure {
-            echo "=================================="
-            echo "Atlas Migration Failed"
-            echo "Check Jenkins Logs"
-            echo "=================================="
-        }
-
         always {
-            echo "Pipeline Finished"
+            script {
+                if (env.DB_TARGET_TYPE == 'EPHEMERAL') {
+                    sh 'docker rm -f jenkins-postgres || true'
+                }
+            }
         }
     }
 }
