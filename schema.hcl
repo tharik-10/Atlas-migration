@@ -16,6 +16,23 @@ table "users" {
     null = true
   }
 
+  // --- NEW FIELDS ADDED HERE ---
+  column "age" {
+    type = integer
+    null = true
+  }
+
+  column "status" {
+    type    = varchar(50)
+    default = "active"
+  }
+
+  column "created_at" {
+    type    = timestamptz
+    default = sql("CURRENT_TIMESTAMP")
+  }
+  // -----------------------------
+
   primary_key {
     columns = [column.id]
   }
