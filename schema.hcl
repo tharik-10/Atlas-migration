@@ -4,34 +4,15 @@ table "users" {
   schema = schema.public
 
   column "id" {
-    type = int
+    type = serial
   }
 
   column "name" {
-    type = varchar(100)
+    type = varchar(255)
   }
 
   column "email" {
     type = varchar(255)
-  }
-
-  column "address" {
-    type = varchar(255)
-    null = true
-  }
-
-  column "location" {
-    type = varchar(100)
-    null = true
-  }
-
-  column "phone_number" {
-    type = varchar(20)
-    null = true
-  }
-
-  column "city" {
-    type = varchar(100)
     null = true
   }
 
